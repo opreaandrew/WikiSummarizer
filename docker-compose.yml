@@ -1,0 +1,101 @@
+version: '3.8'
+
+services:
+  scraper:
+    build:
+      context: ./services/scraper
+      dockerfile: Dockerfile
+    volumes:
+      - data_volume:/app/data
+    networks:
+      - wikisummarizer_network
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  preprocessor:
+    build:
+      context: ./services/preprocessor
+      dockerfile: Dockerfile
+    volumes:
+      - data_volume:/app/data
+    networks:
+      - wikisummarizer_network
+    depends_on:
+      scraper:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  trainer:
+    build:
+      context: ./services/trainer
+      dockerfile: Dockerfile
+    volumes:
+      - data_volume:/app/data
+      - model_volume:/app/models
+    networks:
+      - wikisummarizer_network
+    depends_on:
+      preprocessor:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/models') else 1)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  summarizer:
+    build:
+      context: ./services/summarizer
+      dockerfile: Dockerfile
+    volumes:
+      - model_volume:/app/models
+    networks:
+      - wikisummarizer_network
+    depends_on:
+      trainer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8001/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  web-ui:
+    build:
+      context: ./services/web-ui
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - data_volume:/app/data
+      - model_volume:/app/models
+    networks:
+      - wikisummarizer_network
+    depends_on:
+      summarizer:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+volumes:
+  data_volume:
+  model_volume:
+
+networks:
+  wikisummarizer_network:
+    driver: bridge
